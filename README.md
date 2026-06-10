@@ -1,4 +1,4 @@
-# MRI DICOM → NIfTI → Defacing Workflow
+# MRI DICOM → NIfTI → Defacing Workflow  → MNI Coordinates
 
 ## Inspect DICOM Metadata
 
