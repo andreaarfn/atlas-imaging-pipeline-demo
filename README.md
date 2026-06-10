@@ -1,5 +1,12 @@
 # MRI DICOM → NIfTI → Defacing Workflow  → MNI Coordinates
 
+Examples
+
+<img width="1460" height="544" alt="image" src="https://github.com/user-attachments/assets/c98d63d0-e460-4c8c-a757-2de847130a2f" />
+
+<img width="1598" height="544" alt="image" src="https://github.com/user-attachments/assets/39c9e3ac-bda1-4c75-a948-f746724b710a" />
+
+
 ## Inspect DICOM Metadata
 
 ```bash
