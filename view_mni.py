@@ -2,7 +2,7 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 
 img = nib.load(
-    "nifti_mni_output/tra_mni_rigid.nii.gz"
+    "nifti_mni_output/sag_mni_rigid.nii.gz"
 )
 
 data = img.get_fdata()

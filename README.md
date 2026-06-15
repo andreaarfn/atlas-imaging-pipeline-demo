@@ -66,13 +66,21 @@ python3 -m pip install pydeface
 curl -Ls https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/releases/getfsl.sh | sh -s
 ```
 
-Deface NIfTI Image
+Deface NIfTI Image with PyDeface
 
 ```bash
 mkdir -p nifti_defaced_output
 pydeface \
   nifti_input_folder/original_nifti_file_name.nii.gz \
   --outfile nifti_defaced_output_folder/defaced_nifti_file_name.nii.gz
+```
+OR
+
+Deface NiFTI image with AFNI
+```bash
+cd
+curl -O https://afni.nimh.nih.gov/pub/dist/bin/misc/@update.afni.binaries
+tcsh @update.afni.binaries -package macos_13_ARM -do_extras
 ```
 
 Compare defaced versus original image
@@ -124,3 +132,17 @@ Template Selection Guidelines
 
 Read more here: https://fsl.fmrib.ox.ac.uk/fsl/docs/other/datasets.html
 
+
+---
+
+## Converting NiFTI to BIDS
+
+python3 -m pip install nibabel numpy
+
+```bash
+python3 nifti_to_bids.py \
+  --input-dir nifti_mni_output \
+  --output-dir bids_output \
+  --subject 001 \
+  --suffix T1w
+```

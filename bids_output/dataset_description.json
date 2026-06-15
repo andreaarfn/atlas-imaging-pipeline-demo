@@ -1,0 +1,11 @@
+{
+  "Name": "ATLAS Imaging Prototype",
+  "BIDSVersion": "1.9.0",
+  "DatasetType": "raw",
+  "GeneratedBy": [
+    {
+      "Name": "ATLAS imaging pipeline prototype",
+      "Description": "DICOM to NIfTI, defacing, rigid FLIRT registration to MNI space, and BIDS organization."
+    }
+  ]
+}

@@ -2,8 +2,8 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 
 files = [
-    ("Original", "nifti_output/_t1_tse_dark-fluid_tra_p4_20240808172452_1032.nii.gz"),
-    ("Defaced", "nifti_defaced_output/tra_defaced.nii.gz"),
+    ("Original", "nifti_output/_t1_tse_dark-fluid_sag_20240808172452_1044.nii.gz"),
+    ("Defaced", "nifti_defaced_output/sag_defaced.nii.gz"),
 ]
 
 for title, file in files:
