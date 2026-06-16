@@ -1,5 +1,6 @@
 from pathlib import Path
 import nibabel as nib
+import matplotlib.pyplot as plt
 
 
 script_dir = Path(__file__).resolve().parent
@@ -50,3 +51,23 @@ for f in nifti_files:
     print("Data type:", img.get_data_dtype())
     print("Affine:")
     print(img.affine)
+
+    data = img.get_fdata()
+
+    if data.ndim < 3:
+        print("Skipping display: image is not 3D.")
+        continue
+
+    # If 4D, show the first volume
+    if data.ndim == 4:
+        data_to_show = data[:, :, :, 0]
+    else:
+        data_to_show = data
+
+    middle = data_to_show.shape[2] // 2
+
+    plt.figure()
+    plt.imshow(data_to_show[:, :, middle].T, cmap="gray", origin="lower")
+    plt.title(str(relative_path))
+    plt.axis("off")
+    plt.show()
