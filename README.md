@@ -1,4 +1,4 @@
-# MRI DICOM → NIfTI → Defacing Workflow  → MNI Coordinates
+# MRI DICOM → NIfTI → Defacing Workflow  → MNI Coordinates →  BIDS Format
 
 Examples
 
@@ -6,99 +6,94 @@ Examples
 
 <img width="1598" height="544" alt="image" src="https://github.com/user-attachments/assets/39c9e3ac-bda1-4c75-a948-f746724b710a" />
 
+## Setup
 
-## Inspect DICOM Metadata
+Create and activate the virtual environment:
 
 ```bash
-brew install pydantic
-python3 inspect_dicom.py
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
----
+Install the required Python packages:
 
-## Convert DICOM to NIfTI
+```bash
+python -m pip install pydicom nibabel matplotlib numpy pillow pydeface
+```
+
+Install command-line tools:
 
 ```bash
 brew install dcm2niix
-
-mkdir -p nifti_output
-
-dcm2niix -z y -b y -o nifti_output dicom_files
 ```
 
-#### `-z y`
-
-Compress output files. Without compression you get `image.nii` which is a very large file instead of `image.nii.gz`
-
-#### `-b y`
-
-Generate a metadata sidecar JSON file (`image.json`)
-
-## NIfTI Metadata
-Inspect NIfTI dimensions, voxel sizes, and affine matrices:
+Install FSL once, which is required for PyDeface and MNI registration:
 
 ```bash
-python3 -m pip install nibabel
-python3 inspect_nifti.py
-```
-
-Outputs shape, voxel size, and affine matrix, useful for understanding image geometry and coordinate systems.
-
-## Visualize NIfTI Images
-
-View the middle slice of the NIfTI volume:
-
-```bash
-python3 view_nifti.py
-```
-
-In the bottom right corner you will see:
-```text
-(x,y) = pixel position
-[231] = brightness/intensity at that pixel
-```
-
----
-
-## Defacing
-
-```bash
-python3 -m pip install pydeface
 curl -Ls https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/releases/getfsl.sh | sh -s
 ```
 
-Deface NIfTI Image with PyDeface
+## Step 1: Inspect DICOM Files
+
+Inspect DICOM metadata and preview images from `dicom_files/`. This script is subfolder-aware.
 
 ```bash
-mkdir -p nifti_defaced_output
-pydeface \
-  nifti_input_folder/original_nifti_file_name.nii.gz \
-  --outfile nifti_defaced_output_folder/defaced_nifti_file_name.nii.gz
+python scripts/inspect_dicom.py
 ```
 
-Compare defaced versus original image
+## Step 2: Convert DICOM to NIfTI
+
+Convert DICOM files from `dicom_files/` into NIfTI format. Patient or scan subfolders are preserved in `nifti_output/`.
 
 ```bash
-python3 compare_defacing.py
+python scripts/convert_dicom_to_nifti.py
 ```
 
----
+## Step 3: Inspect NIfTI Files
 
-## Rigid Transform to MNI Space
-
-mkdir -p nifti_mni_output
+Inspect NIfTI geometry, voxel size, affine, and data type.
 
 ```bash
-flirt \
-  -in nifti_defaced_output/sag_defaced.nii.gz \
-  -ref $FSLDIR/data/standard/MNI152_T1_2mm.nii.gz \
-  -out nifti_mni_output/sag_mni_rigid.nii.gz \
-  -omat nifti_mni_output/sag_mni_rigid.mat \
-  -dof 6
-python3 view_mni.py
-``` 
+python scripts/inspect_nifti.py
+```
 
-Template Selection Guidelines
+## Step 4: Deface NIfTI Files
+
+Deface the NIfTI files using PyDeface.
+
+```bash
+python scripts/deface_nifti_pydeface.py
+```
+
+The defaced files will be written to `nifti_defaced_pydeface_output/`.
+
+## Step 5: Compare Original and Defaced Images
+
+Visually compare the original and defaced NIfTI files.
+
+```bash
+python scripts/compare_defacing_and_raw_nifti.py
+```
+
+## Step 6: Rigid Transform to MNI Space
+
+Rigidly register the defaced NIfTI files to MNI space using FSL FLIRT.
+
+```bash
+python scripts/rigid_transform_mni.py
+```
+
+The MNI-registered files and transform matrices will be written to `nifti_mni_output/`.
+
+## Step 7: Inspect MNI Transform
+
+Preview the MNI-registered outputs.
+
+```bash
+python scripts/inspect_mni_transform.py
+```
+
+MNI Template Selection Guidelines
 
 1. Match the imaging modality
    - T1 MRI → T1 template
@@ -126,16 +121,14 @@ Template Selection Guidelines
 Read more here: https://fsl.fmrib.ox.ac.uk/fsl/docs/other/datasets.html
 
 
----
+## Step 8: Convert NIfTI Outputs to BIDS
 
-## Converting NiFTI to BIDS
-
-python3 -m pip install nibabel numpy
+Organize the MNI-registered NIfTI files into a BIDS-compatible structure.
 
 ```bash
-python3 nifti_to_bids.py \
-  --input-dir nifti_mni_output \
-  --output-dir bids_output \
-  --subject 001 \
-  --suffix T1w
+python scripts/nifti_to_bids.py
 ```
+
+This creates a `bids_output/` folder.
+
+
