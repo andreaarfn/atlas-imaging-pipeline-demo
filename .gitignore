@@ -1,0 +1,39 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# macOS files
+.DS_Store
+
+# Imaging input data — do not commit raw DICOMs
+dicom_files/
+**/dicom_files/
+
+# Generated NIfTI outputs
+nifti_output/
+**/nifti_output/
+
+nifti_defaced_pydeface_output/
+**/nifti_defaced_pydeface_output/
+
+nifti_mni_output/
+**/nifti_mni_output/
+
+# Generated BIDS output
+bids_output/
+**/bids_output/
+
+# Large neuroimaging files
+*.dcm
+*.nii
+*.nii.gz
+*.mat
+
+# Logs
+*.log

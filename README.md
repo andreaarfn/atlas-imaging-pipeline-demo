@@ -10,6 +10,7 @@ Examples
 ## Inspect DICOM Metadata
 
 ```bash
+brew install pydantic
 python3 inspect_dicom.py
 ```
 
@@ -22,7 +23,7 @@ brew install dcm2niix
 
 mkdir -p nifti_output
 
-dcm2niix -z y -b y -o nifti_output .
+dcm2niix -z y -b y -o nifti_output dicom_files
 ```
 
 #### `-z y`
@@ -73,14 +74,6 @@ mkdir -p nifti_defaced_output
 pydeface \
   nifti_input_folder/original_nifti_file_name.nii.gz \
   --outfile nifti_defaced_output_folder/defaced_nifti_file_name.nii.gz
-```
-OR
-
-Deface NiFTI image with AFNI
-```bash
-cd
-curl -O https://afni.nimh.nih.gov/pub/dist/bin/misc/@update.afni.binaries
-tcsh @update.afni.binaries -package macos_13_ARM -do_extras
 ```
 
 Compare defaced versus original image

@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
 """
-- Extracts image geometry metadata (dimensions, voxel sizes, affine transforms, data type)
-  from NIfTI headers and writes BIDS-style JSON sidecars.
+- Extracts image geometry metadata from NIfTI headers and writes BIDS-style JSON sidecars.
 - Preserves FSL registration matrices (.mat) in a subject xfm/ folder.
 - Organizes existing files into a BIDS-compatible structure without modifying image data.
+- Recursively reads nifti_mni_output/ and supports patient/session-style subfolders.
 
 Limitations:
 - NIfTI headers do not contain all original DICOM metadata. Information such as scanner
@@ -19,12 +18,12 @@ Limitations:
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple, Set
 
 import nibabel as nib
 import numpy as np
@@ -47,26 +46,97 @@ def json_safe(value: Any) -> Any:
     return value
 
 
+def clean_bids_label(value: str, fallback: str = "unk") -> str:
+    """
+    BIDS labels should be alphanumeric.
+    This also strips a leading 'sub-' if present.
+    """
+    value = value.strip()
+
+    if value.lower().startswith("sub-"):
+        value = value[4:]
+
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", value)
+
+    return cleaned or fallback
+
+
+def nifti_base_name(path: Path) -> str:
+    """Return filename without .nii or .nii.gz."""
+    if path.name.endswith(".nii.gz"):
+        return path.name[:-7]
+    if path.name.endswith(".nii"):
+        return path.name[:-4]
+    return path.stem
+
+
+def nifti_extension(path: Path) -> str:
+    """Return .nii.gz or .nii."""
+    if path.name.endswith(".nii.gz"):
+        return ".nii.gz"
+    if path.name.endswith(".nii"):
+        return ".nii"
+    return path.suffix
+
+
+def infer_subject_label(nifti_path: Path, input_dir: Path, forced_subject: Optional[str], root_subject: str) -> str:
+    """
+    Infer subject from the first subfolder under input_dir.
+
+    Example:
+      nifti_mni_output/patient001/scanA/image.nii.gz -> sub-patient001
+
+    If the file is directly inside nifti_mni_output, use root_subject.
+    If --subject is provided, use that for every file.
+    """
+    if forced_subject:
+        return clean_bids_label(forced_subject, fallback=root_subject)
+
+    relative_path = nifti_path.relative_to(input_dir)
+
+    if len(relative_path.parts) > 1:
+        first_folder = relative_path.parts[0]
+        return clean_bids_label(first_folder, fallback=root_subject)
+
+    return clean_bids_label(root_subject, fallback="001")
+
+
 def infer_acquisition_label(path: Path) -> str:
-    """Infer an acquisition label from filename prefixes of input."""
-    name = path.name.lower()
-    if name.startswith("sag") or "_sag" in name:
-        return "sag"
-    if name.startswith("tra") or name.startswith("ax") or "_tra" in name or "_ax" in name:
-        return "tra"
-    if name.startswith("cor") or "_cor" in name:
-        return "cor"
-    return path.name.split("_")[0].replace(".", "").replace("-", "") or "unk"
+    """
+    Infer an acquisition label from the filename.
+
+    With protocol_series naming, this turns something like:
+      t1_tse_dark-fluid_sag_1044_mni_rigid.nii.gz
+
+    into:
+      acq-t1tsedarkfluidsag1044
+
+    This avoids collisions better than only using 'sag' or 't1'.
+    """
+    base = nifti_base_name(path).lower()
+
+    for suffix in [
+        "_mni_rigid",
+        "_defaced",
+        "_pydeface",
+        "_mni",
+    ]:
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+
+    acquisition = clean_bids_label(base, fallback="unk")
+
+    return acquisition
 
 
-def copy_nii_gz(src: Path, dst: Path) -> None:
+def copy_nifti(src: Path, dst: Path) -> None:
     """Copy NIfTI file without modifying image data."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
 
 
-def read_nifti_metadata(nifti_path: Path) -> Dict[str, Any]:
-    """Extract useful metadata from a NIfTI image header and affine"""
+def read_nifti_metadata(nifti_path: Path, input_dir: Path) -> Dict[str, Any]:
+    """Extract useful metadata from a NIfTI image header and affine."""
     img = nib.load(str(nifti_path))
     hdr = img.header
 
@@ -82,7 +152,7 @@ def read_nifti_metadata(nifti_path: Path) -> Dict[str, Any]:
                 "GeneratedAt": datetime.now(timezone.utc).isoformat(),
             }
         ],
-        "SourceFile": str(nifti_path),
+        "SourceFile": str(nifti_path.relative_to(input_dir)),
         "ImageType": "DERIVED\\SECONDARY",
         "Modality": "MR",
         "SkullStripped": False,
@@ -106,7 +176,6 @@ def read_nifti_metadata(nifti_path: Path) -> Dict[str, Any]:
         "Descrip": json_safe(hdr["descrip"]),
     }
 
-    # Optional TR for 4D data; for structural scans this often is absent or not meaningful.
     if len(zooms) >= 4:
         meta["RepetitionTime"] = float(zooms[3])
 
@@ -135,26 +204,37 @@ def write_dataset_description(bids_root: Path, dataset_name: str) -> None:
     write_json(bids_root / "dataset_description.json", payload)
 
 
-def write_participants_tsv(bids_root: Path, subject: str) -> None:
+def write_participants_tsv(bids_root: Path, subjects: Set[str]) -> None:
     path = bids_root / "participants.tsv"
     path.parent.mkdir(parents=True, exist_ok=True)
+
     with path.open("w", encoding="utf-8") as f:
         f.write("participant_id\n")
-        f.write(f"sub-{subject}\n")
+        for subject in sorted(subjects):
+            f.write(f"sub-{subject}\n")
 
 
 def find_nifti_files(input_dir: Path) -> Iterable[Path]:
-    return sorted(input_dir.glob("*.nii.gz")) + sorted(input_dir.glob("*.nii"))
+    """Find NIfTI files recursively."""
+    return sorted(
+        list(input_dir.rglob("*.nii.gz")) +
+        list(input_dir.rglob("*.nii"))
+    )
 
 
 def bids_stem(subject: str, acquisition: str, suffix: str, space: str, desc: str) -> str:
-    # For files already in MNI space, this is closer to BIDS Derivatives naming.
-    # It is still very useful for prototype organization and downstream handoff.
     return f"sub-{subject}_acq-{acquisition}_space-{space}_desc-{desc}_{suffix}"
+
+
+def matching_mat_path(nifti_path: Path) -> Path:
+    """Find the matching FLIRT .mat file next to a .nii or .nii.gz file."""
+    base = nifti_base_name(nifti_path)
+    return nifti_path.parent / f"{base}.mat"
 
 
 def convert_one(
     nifti_path: Path,
+    input_dir: Path,
     bids_root: Path,
     subject: str,
     suffix: str,
@@ -163,23 +243,24 @@ def convert_one(
     template: str,
 ) -> Tuple[Path, Path, Optional[Path]]:
     acquisition = infer_acquisition_label(nifti_path)
+
     anat_dir = bids_root / f"sub-{subject}" / "anat"
     xfm_dir = bids_root / f"sub-{subject}" / "xfm"
 
     stem = bids_stem(subject, acquisition, suffix, space, desc)
-    out_nii = anat_dir / f"{stem}.nii.gz"
+
+    out_nii = anat_dir / f"{stem}{nifti_extension(nifti_path)}"
     out_json = anat_dir / f"{stem}.json"
 
-    copy_nii_gz(nifti_path, out_nii)
-    meta = read_nifti_metadata(nifti_path)
+    copy_nifti(nifti_path, out_nii)
+
+    meta = read_nifti_metadata(nifti_path, input_dir)
     meta["SpatialReference"] = template
     meta["BIDSIntendedFor"] = str(out_nii.relative_to(bids_root))
+
     write_json(out_json, meta)
 
-    mat_path = nifti_path.with_suffix("")
-    if mat_path.name.endswith(".nii"):
-        mat_path = mat_path.with_suffix("")
-    mat_path = nifti_path.parent / nifti_path.name.replace(".nii.gz", ".mat").replace(".nii", ".mat")
+    mat_path = matching_mat_path(nifti_path)
 
     out_mat = None
     if mat_path.exists():
@@ -191,49 +272,140 @@ def convert_one(
 
 
 def main() -> None:
+    script_dir = Path(__file__).resolve().parent
+    imaging_pipeline_dir = script_dir.parent
+
+    default_input_dir = imaging_pipeline_dir / "nifti_mni_output"
+    default_output_dir = imaging_pipeline_dir / "bids_output"
+
     parser = argparse.ArgumentParser(
         description="Organize defaced, MNI-registered NIfTI files into a BIDS-compatible structure and write JSON sidecars."
     )
-    parser.add_argument("--input-dir", default="nifti_mni_output", help="Folder containing MNI-space NIfTI files and optional FLIRT .mat files.")
-    parser.add_argument("--output-dir", default="bids_output", help="Output BIDS root folder.")
-    parser.add_argument("--subject", default="001", help="BIDS subject label without 'sub-'. Example: 001 or P043.")
-    parser.add_argument("--suffix", default="T1w", help="BIDS imaging suffix. Common values: T1w, T2w, FLAIR, CT.")
-    parser.add_argument("--space", default="MNI152", help="BIDS space label used in filenames.")
-    parser.add_argument("--template", default="MNI152_T1_2mm", help="Template/reference recorded in JSON metadata.")
-    parser.add_argument("--desc", default="defaced", help="BIDS desc label used in filenames.")
-    parser.add_argument("--dataset-name", default="ATLAS Imaging Prototype", help="Name written to dataset_description.json.")
+
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=default_input_dir,
+        help="Folder containing MNI-space NIfTI files and optional FLIRT .mat files."
+    )
+
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=default_output_dir,
+        help="Output BIDS root folder."
+    )
+
+    parser.add_argument(
+        "--subject",
+        default=None,
+        help=(
+            "Optional forced BIDS subject label without 'sub-'. "
+            "If omitted, the first subfolder under input-dir is used as the subject."
+        )
+    )
+
+    parser.add_argument(
+        "--root-subject",
+        default="001",
+        help="Subject label to use for files directly inside input-dir with no patient subfolder."
+    )
+
+    parser.add_argument(
+        "--suffix",
+        default="T1w",
+        help="BIDS imaging suffix. Common values: T1w, T2w, FLAIR, CT."
+    )
+
+    parser.add_argument(
+        "--space",
+        default="MNI152",
+        help="BIDS space label used in filenames."
+    )
+
+    parser.add_argument(
+        "--template",
+        default="MNI152_T1_2mm",
+        help="Template/reference recorded in JSON metadata."
+    )
+
+    parser.add_argument(
+        "--desc",
+        default="defaced",
+        help="BIDS desc label used in filenames."
+    )
+
+    parser.add_argument(
+        "--dataset-name",
+        default="ATLAS Imaging Prototype",
+        help="Name written to dataset_description.json."
+    )
+
     args = parser.parse_args()
 
-    input_dir = Path(args.input_dir)
-    bids_root = Path(args.output_dir)
+    input_dir = args.input_dir
+    bids_root = args.output_dir
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
 
     nifti_files = list(find_nifti_files(input_dir))
+
     if not nifti_files:
         raise FileNotFoundError(f"No .nii or .nii.gz files found in: {input_dir}")
 
-    write_dataset_description(bids_root, args.dataset_name)
-    write_participants_tsv(bids_root, args.subject)
+    print("Input folder:", input_dir)
+    print("BIDS output folder:", bids_root)
+    print(f"Found {len(nifti_files)} NIfTI file(s).")
 
-    print(f"Found {len(nifti_files)} NIfTI file(s) in {input_dir}")
+    subjects: Set[str] = set()
+
+    write_dataset_description(bids_root, args.dataset_name)
+
+    current_folder = None
+
     for nifti_path in nifti_files:
+        relative_path = nifti_path.relative_to(input_dir)
+        relative_folder = relative_path.parent
+
+        if relative_folder != current_folder:
+            current_folder = relative_folder
+            print("\n====================")
+            print("Subfolder:", current_folder)
+            print("====================")
+
+        subject = infer_subject_label(
+            nifti_path=nifti_path,
+            input_dir=input_dir,
+            forced_subject=args.subject,
+            root_subject=args.root_subject,
+        )
+
+        subjects.add(subject)
+
         out_nii, out_json, out_mat = convert_one(
             nifti_path=nifti_path,
+            input_dir=input_dir,
             bids_root=bids_root,
-            subject=args.subject,
+            subject=subject,
             suffix=args.suffix,
             space=args.space,
             desc=args.desc,
             template=args.template,
         )
-        print(f"Wrote image:    {out_nii}")
-        print(f"Wrote sidecar:  {out_json}")
+
+        print("\n--------------------")
+        print(f"Input:         {relative_path}")
+        print(f"Subject:       sub-{subject}")
+        print(f"Wrote image:   {out_nii.relative_to(bids_root)}")
+        print(f"Wrote sidecar: {out_json.relative_to(bids_root)}")
+
         if out_mat:
-            print(f"Copied xfm mat: {out_mat}")
+            print(f"Copied xfm:    {out_mat.relative_to(bids_root)}")
         else:
-            print(f"No matching .mat found for {nifti_path.name}")
+            print(f"No matching .mat found for {relative_path}")
+
+    write_participants_tsv(bids_root, subjects)
 
     print("\nDone. Suggested validation:")
     print(f"  bids-validator {bids_root}")
